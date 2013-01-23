@@ -1,0 +1,287 @@
+#!/bin/bash
+
+#
+# texcomp ver 1.30   Date 2013.01.24
+#
+# texファイルをコンパイルし、ドキュメントビューアーを起動するシェルスクリプト.
+# utf 対応した ptetex 用で, nkf しない.
+# オプションによってドキュメントビューアーの起動をカットできる.
+# また,オプション"-n"を選択しなかったけどコンパイルエラーでちゃった,
+# などの事態に備えて,
+# コンパイル後にドキュメントビューアーを起動するかどうか選択できるようにする.
+
+# オプションを取得
+# n:コンパイルを行うが, ドキュメントビューアーは起動しない.
+# l:コンパイルの際, 用紙を横置きにする.
+# r:コンパイル後, tex ファイルと pdf ファイル以外を消去しない.
+# b:.bib ファイルを用いて, bibtex を使う.
+# h:ヘルプを表示.
+
+open=1
+landscape=0
+help=0
+#remove=0
+remove=1
+bibtex=0
+
+while getopts hlnrb opt
+do
+    case $opt in
+	h)
+	    help=1;;
+	l)
+	    landscape=1;;
+	n)
+	    open=0;;
+	r)
+	    #remove=1;;
+	    remove=0;;
+	b)
+	    bibtex=1;;
+	*)
+	    help=1;;
+    esac
+done
+
+shift $(($OPTIND -1))
+
+
+#################
+##### 文句集 ####
+#################
+
+# ファイルが指定されていない時の文句.
+error_DontNameFile="
+例外:SyntaxException\n
+入力するファイルを指定してください.\n
+例:texcomp textdata.tex"
+
+# ファイルが2つ以上指定されている.
+error_TooManyFiles="
+例外:SyntaxException\n
+入力するファイルは1つです.\n
+例:texcomp textdata.tex"
+
+# ファイルが存在しない.
+error_FileNotExist="
+例外:FileNotExistException\n
+そのようなファイルは存在しません."
+
+# ヘルプ.
+sentence_help="
+オプション\n
+n:コンパイルを行うが,ドキュメントビューアーは起動しない.\n
+l:コンパイルの際,用紙を横置きにする.\n
+r:コンパイル後,tex ファイルと pdf ファイル以外を消去しない.\n
+b:.bib ファイルを用いて, bibtex を使う.
+h:ヘルプを表示."
+
+
+
+################
+##### 処理 #####
+################
+
+# オプションやその後続引数を除いた引数が1つ以外の場合,
+# ヘルプを表示するようにする. 
+# そしてエラー終了ステータスを返す.
+if [ $help -eq 0 ]
+then
+    if [ $# -eq 0 ]
+    then
+	# ファイルが指定されてないぞ!
+	echo -e $error_DontNameFile 1>&2
+	echo -e $sentence_help 1>&2
+	exit 1
+    elif [ $# -gt 2 ]
+    then
+	# 指定ファイルが多すぎるぞ!
+	echo -e $error_TooManyFiles 1>&2
+	echo -e $sentence_help 1>&2
+	exit 1
+    fi
+fi
+
+# オプション h の場合,以下の処理を実行して正常終了する.
+if [ $help -eq 1 ]
+then
+	echo -e $sentence_help
+	exit 0
+fi
+
+
+# 以下, 処理を実行していく.
+
+if test ! -e $1
+then
+# ファイルが存在しないようだ.
+    echo -e $error_FileNotExist 1>&2
+    echo "file:$1" 1>&2
+    exit 1
+
+else
+    name=${1%.tex}
+    nameEUC=${name}EUC
+    nameEUC=${name}   #utf 対応 TeX 環境用.
+#    nkf -e  $1 > ${name}EUC.tex   #utf 未対応 TeX 環境用.
+    platex ${nameEUC}.tex
+    if [ $? -ne 0 ]
+    then
+	exit 1
+    fi
+ 
+    # bibtex を使う設定なときは使う.
+    if [ $bibtex -eq 1 ]
+    then
+	pbibtex ${nameEUC}.aux
+	platex ${nameEUC}.tex
+    fi
+
+    platex ${nameEUC}.tex
+
+    if [ $landscape -eq 0 ]
+    then
+	dvipdfmx -p a4 -o ${name}.pdf ${nameEUC}.dvi
+	echo "呼:用紙を縦方向にてコンパイル完了."
+    else
+	dvipdfmx -p a4 -l -o ${name}.pdf ${nameEUC}.dvi
+	echo "呼:用紙を横方向にてコンパイル完了."
+    fi
+
+    # 文字コードを euc-jp に変えて保存したテキストを削除.
+#    rm ${nameEUC}.tex
+
+    # aux ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.aux
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.aux
+	else
+#	    mv ${nameEUC}.aux ${name}.aux
+	    :
+	fi
+    fi
+
+    # log ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.log
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.log
+	else
+#	    mv ${nameEUC}.log ${name}.log
+	    :
+	fi
+    fi
+    
+    # 文献ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.bbl
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.bbl
+	else
+#	    mv ${nameEUC}.bbl ${name}.bbl
+	    :
+	fi
+    fi
+    if test -e ${nameEUC}.blg
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.blg
+	else
+#	    mv ${nameEUC}.blg ${name}.blg
+	    :
+	fi
+    fi
+
+    # 本文の目次ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.toc
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.toc
+	else
+#	    mv ${nameEUC}.toc ${name}.toc
+	    :
+	fi
+    fi
+
+    # 図の目次ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.lot
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.lot
+	else
+#	    mv ${nameEUC}.lot ${name}.lot
+	    :
+	fi
+    fi
+
+    # 表の目次ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.lof
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.lof
+	else
+#	    mv ${nameEUC}.lof ${name}.lof
+	    :
+	fi
+    fi
+    
+    # 用語一覧ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.glo
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.glo
+	else
+#	    mv ${nameEUC}.glo ${name}.glo
+	    :
+	fi
+    fi
+
+    # 索引ファイルがあれば, その名前を書き換えるか削除.
+    if test -e ${nameEUC}.idx
+    then
+	if [ $remove -eq 1 ]
+	then
+	    rm ${nameEUC}.idx
+	else
+#	    mv ${nameEUC}.idx ${name}.idx
+	    :
+	fi
+    fi
+		
+    # dvi ファイルの名前を書き換えるか削除.
+    if [ $remove -eq 1 ]
+    then
+	rm ${nameEUC}.dvi
+    else
+#	mv ${nameEUC}.dvi ${name}.dvi
+	:
+    fi
+
+    # 消去指定した場合, 以下の処理を実行する.
+    if [ $remove -eq 1 ]
+    then
+	echo "呼:不要なファイルの消去完了."
+    fi
+fi
+
+if [ $open -eq 1 ]
+then
+    echo "ドキュメントビューアーを起動しますか?"
+    echo "起動する場合は任意の文字を入力しEnterを押してください."
+    echo "そうでないなら何も入力せずEnterを押してください."
+    
+    read ans
+    if [ "$ans" != "" ]
+    then
+	open ${name}.pdf
+    fi
+fi
