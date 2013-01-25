@@ -36,7 +36,6 @@ do
 	n)
 	    open=0;;
 	r)
-	    #remove=1;;
 	    remove=0;;
 	b)
 	    bibtex=1;;
@@ -117,7 +116,7 @@ then
 fi
 
 # pbibtex コマンドが存在するかどうかをチェック.
-if [ -z `which pbibtex` ]
+if [ $bibtex -eq 1 -a -z `which pbibtex` ]
 then
     echo -e $error_PBibtexCommandNotExist
     exit 1
