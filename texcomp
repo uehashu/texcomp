@@ -1,30 +1,32 @@
 #!/bin/bash
 
 #
-# texcomp ver 1.30   Date 2013.01.24
+# texcomp ver 2.00   Date 2013.01.25
 #
 # texファイルをコンパイルし、ドキュメントビューアーを起動するシェルスクリプト.
-# utf 対応した ptetex 用で, nkf しない.
+# Shift-JIS, EUC-jp, UTF-8 のどれでも気にせずコンパイルできる.
 # オプションによってドキュメントビューアーの起動をカットできる.
 # また,オプション"-n"を選択しなかったけどコンパイルエラーでちゃった,
-# などの事態に備えて,
-# コンパイル後にドキュメントビューアーを起動するかどうか選択できるようにする.
+# などの事態に備えて, コンパイル後にドキュメントビューアーを
+# 起動するかどうか選択できるようにする.
 
 # オプションを取得
-# n:コンパイルを行うが, ドキュメントビューアーは起動しない.
-# l:コンパイルの際, 用紙を横置きにする.
-# r:コンパイル後, tex ファイルと pdf ファイル以外を消去しない.
-# b:.bib ファイルを用いて, bibtex を使う.
-# h:ヘルプを表示.
+# -n          :コンパイルを行うが, ドキュメントビューアーは起動しない.
+# -l          :コンパイルの際, 用紙を横置きにする.
+# -r          :コンパイル後, tex ファイルと pdf ファイル以外を消去しない.
+# -b          :.bib ファイルを用いて, bibtex を使う.
+# -o FILENAME :出力ファイル名を指定.
+# -h          :ヘルプを表示.
 
 open=1
 landscape=0
 help=0
-#remove=0
 remove=1
 bibtex=0
+compileError=1
+outputFileName=""
 
-while getopts hlnrb opt
+while getopts hlnrbo: opt
 do
     case $opt in
 	h)
@@ -38,6 +40,8 @@ do
 	    remove=0;;
 	b)
 	    bibtex=1;;
+	o)
+	    outputFileName=$OPTARG;;
 	*)
 	    help=1;;
     esac
@@ -46,9 +50,9 @@ done
 shift $(($OPTIND -1))
 
 
-#################
-##### 文句集 ####
-#################
+##################
+##### 文句集 #####
+##################
 
 # ファイルが指定されていない時の文句.
 error_DontNameFile="
@@ -67,20 +71,57 @@ error_FileNotExist="
 例外:FileNotExistException\n
 そのようなファイルは存在しません."
 
+# nkf コマンドが存在しない.
+error_NKFCommandNotExist="
+例外: CommandNotExistException\n
+nkf コマンドが存在しません."
+
+# platex コマンドが存在しない.
+error_PLatexCommandNotExist="
+例外: CommandNotExistException\n
+platex コマンドが存在しません."
+
+# pbibtex コマンドが存在しない.
+error_PBibtexCommandNotExist="
+例外: CommandNotExistException\n
+pbibtex コマンドが存在しません."
+
 # ヘルプ.
 sentence_help="
 オプション\n
-n:コンパイルを行うが,ドキュメントビューアーは起動しない.\n
-l:コンパイルの際,用紙を横置きにする.\n
-r:コンパイル後,tex ファイルと pdf ファイル以外を消去しない.\n
-b:.bib ファイルを用いて, bibtex を使う.
-h:ヘルプを表示."
+-n          :コンパイルを行うが,ドキュメントビューアーは起動しない.\n
+-l          :コンパイルの際,用紙を横置きにする.\n
+-r          :コンパイル後, 通常は tex ファイルと pdf ファイル以外を消去するが, それをしない.\n
+-b          :.bib ファイルを用いて, bibtex を使う.\n
+-o FILENAME :出力ファイル名を指定.\n
+-h          :ヘルプを表示."
 
 
 
 ################
 ##### 処理 #####
 ################
+
+# nkf コマンドが存在するかどうかをチェック.
+if [ -z `which nkf` ]
+then
+    echo -e $error_NKFCommandNotExist
+    exit 1
+fi
+
+# platex コマンドが存在するかどうかをチェック.
+if [ -z `which platex` ]
+then
+    echo -e $error_PLatexCommandNotExist
+    exit 1
+fi
+
+# pbibtex コマンドが存在するかどうかをチェック.
+if [ -z `which pbibtex` ]
+then
+    echo -e $error_PBibtexCommandNotExist
+    exit 1
+fi
 
 # オプションやその後続引数を除いた引数が1つ以外の場合,
 # ヘルプを表示するようにする. 
@@ -110,170 +151,122 @@ then
 fi
 
 
-# 以下, 処理を実行していく.
-
+# ファイルは存在するか?
 if test ! -e $1
 then
 # ファイルが存在しないようだ.
     echo -e $error_FileNotExist 1>&2
     echo "file:$1" 1>&2
     exit 1
+fi
 
+
+
+##### 以下, 処理を実行していく. #####
+
+# tex ファイルの文字コードを取得する.
+encode=`nkf -g $1`
+
+if [ $encode = "Shift_JIS" ]
+then
+    optionEncode="-kanji=sjis"
+elif [ $encode = "EUC-JP" ]
+then
+    optionEncode="-kanji=euc"
+elif [ $encode = "UTF-8" ]
+then
+    optionEncode="-kanji=utf8"
 else
-    name=${1%.tex}
-    nameEUC=${name}EUC
-    nameEUC=${name}   #utf 対応 TeX 環境用.
-#    nkf -e  $1 > ${name}EUC.tex   #utf 未対応 TeX 環境用.
-    platex ${nameEUC}.tex
-    if [ $? -ne 0 ]
-    then
-	exit 1
-    fi
- 
+    optionEncode=""
+fi
+
+platex $optionEncode $1
+if [ $? -eq 0 ]
+then
+    
+    compileError=0
+    
     # bibtex を使う設定なときは使う.
     if [ $bibtex -eq 1 ]
     then
-	pbibtex ${nameEUC}.aux
-	platex ${nameEUC}.tex
+	pbibtex $optionEncode ${1%tex}aux
+	platex $optionEncode $1
     fi
-
-    platex ${nameEUC}.tex
-
+    
+    # もう1回コンパイル.
+    platex $optionEncode $1
+    
+    # 出力ファイル名を指定.
+    if [ -z $outputFileName ]
+    then
+	outputFileName=${1%tex}pdf
+    fi
+    
     if [ $landscape -eq 0 ]
     then
-	dvipdfmx -p a4 -o ${name}.pdf ${nameEUC}.dvi
+	dvipdfmx -p a4 -o $outputFileName ${1%tex}dvi
 	echo "呼:用紙を縦方向にてコンパイル完了."
     else
-	dvipdfmx -p a4 -l -o ${name}.pdf ${nameEUC}.dvi
+	dvipdfmx -p a4 -l -o $outputFileName ${1%tex}dvi
 	echo "呼:用紙を横方向にてコンパイル完了."
-    fi
-
-    # 文字コードを euc-jp に変えて保存したテキストを削除.
-#    rm ${nameEUC}.tex
-
-    # aux ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.aux
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.aux
-	else
-#	    mv ${nameEUC}.aux ${name}.aux
-	    :
-	fi
-    fi
-
-    # log ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.log
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.log
-	else
-#	    mv ${nameEUC}.log ${name}.log
-	    :
-	fi
-    fi
-    
-    # 文献ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.bbl
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.bbl
-	else
-#	    mv ${nameEUC}.bbl ${name}.bbl
-	    :
-	fi
-    fi
-    if test -e ${nameEUC}.blg
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.blg
-	else
-#	    mv ${nameEUC}.blg ${name}.blg
-	    :
-	fi
-    fi
-
-    # 本文の目次ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.toc
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.toc
-	else
-#	    mv ${nameEUC}.toc ${name}.toc
-	    :
-	fi
-    fi
-
-    # 図の目次ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.lot
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.lot
-	else
-#	    mv ${nameEUC}.lot ${name}.lot
-	    :
-	fi
-    fi
-
-    # 表の目次ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.lof
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.lof
-	else
-#	    mv ${nameEUC}.lof ${name}.lof
-	    :
-	fi
-    fi
-    
-    # 用語一覧ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.glo
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.glo
-	else
-#	    mv ${nameEUC}.glo ${name}.glo
-	    :
-	fi
-    fi
-
-    # 索引ファイルがあれば, その名前を書き換えるか削除.
-    if test -e ${nameEUC}.idx
-    then
-	if [ $remove -eq 1 ]
-	then
-	    rm ${nameEUC}.idx
-	else
-#	    mv ${nameEUC}.idx ${name}.idx
-	    :
-	fi
-    fi
-		
-    # dvi ファイルの名前を書き換えるか削除.
-    if [ $remove -eq 1 ]
-    then
-	rm ${nameEUC}.dvi
-    else
-#	mv ${nameEUC}.dvi ${name}.dvi
-	:
-    fi
-
-    # 消去指定した場合, 以下の処理を実行する.
-    if [ $remove -eq 1 ]
-    then
-	echo "呼:不要なファイルの消去完了."
     fi
 fi
 
-if [ $open -eq 1 ]
+# 削除フラグが立っているとき, 各ファイルが存在すれば削除する.
+if [ $remove -eq 1 ]
+then
+    
+    if [ -e ${1%tex}aux ]
+    then
+	rm ${1%tex}aux
+    fi
+    
+    if [ -e ${1%tex}log ]
+    then
+	rm ${1%tex}log
+    fi
+    
+    if [ -e ${1%tex}bbl ]
+    then
+	rm ${1%tex}bbl
+    fi
+    
+    if [ -e ${1%tex}blg ]
+    then
+	rm ${1%tex}blg
+    fi
+    
+    if [ -e ${1%tex}toc ]
+    then
+	rm ${1%tex}toc
+    fi
+    
+    if [ -e ${1%tex}lot ]
+    then
+	rm ${1%tex}lot
+    fi
+    
+    if [ -e ${1%tex}lof ]
+    then
+	rm ${1%tex}lof
+    fi
+    
+    if [ -e ${1%tex}glo ]
+    then
+	rm ${1%tex}glo
+    fi
+    
+    if [ -e ${1%tex}idx ]
+    then
+	rm ${1%tex}idx
+    fi
+    
+    rm ${1%tex}dvi
+    
+    echo "呼:不要なファイルの消去完了."
+fi
+
+if [ $open -eq 1 -a $compileError -eq 0 ]
 then
     echo "ドキュメントビューアーを起動しますか?"
     echo "起動する場合は任意の文字を入力しEnterを押してください."
@@ -282,6 +275,6 @@ then
     read ans
     if [ "$ans" != "" ]
     then
-	open ${name}.pdf
+	open $outputFileName
     fi
 fi
